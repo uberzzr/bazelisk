@@ -73,14 +73,24 @@ Additionally, a few special version names are supported for our official release
 
 ## Where does Bazelisk get Bazel from?
 
-By default Bazelisk retrieves Bazel releases, release candidates and binaries built at green commits from Google Cloud Storage.
+By default Bazelisk retrieves Bazel releases, release candidates and binaries built at green commits from Google Cloud Storage. The downloaded artifacts are validated against the SHA256 value recorded in `BAZELISK_VERIFY_SHA256` if this variable is set in the configuration file.
 
 As mentioned in the previous section, the `<FORK>/<VERSION>` version format allows you to use your own Bazel fork hosted on GitHub:
 
-If you want to create a fork with your own releases, you have to follow the naming conventions that we use in `bazelbuild/bazel` for the binary file names.
+If you want to create a fork with your own releases, you should follow the naming conventions that we use in `bazelbuild/bazel` for the binary file names as this results in predictable URLs that are similar to the official ones.
 The URL format looks like `https://github.com/<FORK>/bazel/releases/download/<VERSION>/<FILENAME>`.
 
 You can also override the URL by setting the environment variable `$BAZELISK_BASE_URL`. Bazelisk will then append `/<VERSION>/<FILENAME>` to the base URL instead of using the official release server. Bazelisk will read file [`~/.netrc`](https://everything.curl.dev/usingcurl/netrc) for credentials for Basic authentication.
+
+If for any reason none of this works, you can also override the URL format altogether by setting the environment variable `$BAZELISK_FORMAT_URL`. This variable takes a format-like string with placeholders and performs the following replacements to compute the download URL:
+
+- `%e`: Extension suffix, such as the empty string or `.exe`.
+- `%h`: Value of `BAZELISK_VERIFY_SHA256`, respecting uppercase/lowercase characters.
+- `%m`: Machine architecture name, such as `arm64` or `x86_64`.
+- `%o`: Operating system name, such as `darwin` or `linux`.
+- `%v`: Bazel version as determined by Bazelisk.
+- `%%`: Literal `%` for escaping purposes.
+- All other characters after `%` are reserved for future use and result in a processing error.
 
 ## Ensuring that your developers use Bazelisk rather than Bazel
 
@@ -100,7 +110,9 @@ require users update their bazel.
 [shell wrapper script]: https://github.com/bazelbuild/bazel/blob/master/scripts/packages/bazel.sh
 ## Other features
 
-The Go version of Bazelisk offers two new flags.
+The Go version of Bazelisk offers three new flags.
+
+### --strict
 
 `--strict` expands to the set of incompatible flags which may be enabled for the given version of Bazel.
 
@@ -108,17 +120,42 @@ The Go version of Bazelisk offers two new flags.
 bazelisk --strict build //...
 ```
 
+### --migrate
+
 `--migrate` will run Bazel multiple times to help you identify compatibility issues.
 If the code fails with `--strict`, the flag `--migrate` will run Bazel with each one of the flag separately, and print a report at the end.
 This will show you which flags can safely enabled, and which flags require a migration.
+
+
+### --bisect
+
+`--bisect` flag allows you to bisect Bazel versions to find which version introduced a build failure. You can specify the range of versions to bisect with `--bisect=<GOOD>..<BAD>`, where GOOD is the last known working Bazel version and BAD is the first known non-working Bazel version. Bazelisk uses [GitHub's compare API](https://docs.github.com/en/rest/commits/commits#compare-two-commits) to get the list of commits to bisect. When GOOD is not an ancestor of BAD, GOOD is reset to their merge base commit.
+
+Examples:
+```shell
+# Bisect between 6.0.0 and Bazel at HEAD
+bazelisk --bisect=6.0.0..HEAD test //foo:bar_test
+
+# Bisect between 6.1.0 and the second release candidate of Bazel 6.2.0
+bazelisk --bisect=6.1.0..release-6.2.0rc2 test //foo:bar_test
+
+# Bisect between two commits on the main branch (or branches with `release-` prefix) of the Bazel GitHub repository.
+bazelisk --bisect=<good commit hash>..<bad commit hash> test //foo:bar_test
+```
+
+Note that, Bazelisk uses prebuilt Bazel binaries at commits on the main and release branches, therefore you cannot bisect your local commits.
+
+### Useful environment variables for --migrate and --bisect
 
 You can set `BAZELISK_INCOMPATIBLE_FLAGS` to set a list of incompatible flags (separated by `,`) to be tested, otherwise Bazelisk tests all flags starting with `--incompatible_`.
 
 You can set `BAZELISK_GITHUB_TOKEN` to set a GitHub access token to use for API requests to avoid rate limiting when on shared networks.
 
-You can set `BAZELISK_SHUTDOWN` to run `shutdown` between builds when migrating if you suspect this affects your results.
+You can set `BAZELISK_SHUTDOWN` to run `shutdown` between builds when migrating or bisecting if you suspect this affects your results.
 
-You can set `BAZELISK_CLEAN` to run `clean --expunge` between builds when migrating if you suspect this affects your results.
+You can set `BAZELISK_CLEAN` to run `clean --expunge` between builds when migrating or bisecting if you suspect this affects your results.
+
+## tools/bazel
 
 If `tools/bazel` exists in your workspace root and is executable, Bazelisk will run this file, instead of the Bazel version it downloaded.
 It will set the environment variable `BAZEL_REAL` to the path of the downloaded Bazel binary.
@@ -149,6 +186,7 @@ The following variables can be set:
 - `BAZELISK_SHUTDOWN`
 - `BAZELISK_SKIP_WRAPPER`
 - `BAZELISK_USER_AGENT`
+- `BAZELISK_VERIFY_SHA256`
 - `USE_BAZEL_VERSION`
 
 Configuration variables are evaluated with precedence order. The preferred values are derived in order from highest to lowest precedence as follows:

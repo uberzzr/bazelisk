@@ -12,7 +12,7 @@ go_library(
 )
 
 go_test(
-    name = "platforms_test",
+    name = "go_default_test",
     srcs = ["platforms_test.go"],
     embed = [":go_default_library"],
 )
